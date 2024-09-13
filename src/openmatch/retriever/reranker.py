@@ -29,11 +29,12 @@ def encode_pair(tokenizer, item1, item2, max_len_1=32, max_len_2=128, encode_as_
             padding="max_length",
             max_length=max_len_1 + max_len_2 + 2,
         )
-    return tokenizer.encode_plus(
-        item1 + item2,
-        truncation="longest_first",
+    pad_input = {"input_ids":[tokenizer.bos_token_id] + item1 + [tokenizer.eos_token_id] + item2}
+    return tokenizer.pad(
+        pad_input,
         padding="max_length",
         max_length=max_len_1 + max_len_2 + 2,
+        return_tensors="pt",
     )
 
 

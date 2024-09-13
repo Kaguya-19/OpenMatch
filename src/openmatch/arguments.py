@@ -42,6 +42,9 @@ class ModelArguments:
     pooling: str = field(
         default="first", metadata={"help": "How to pool the features from the HF PLM"}
     )
+    attention: str = field(
+        default="causal", metadata={"help": "Use causal/bidirectional attention"}
+    )
 
     # out projection
     add_linear_head: bool = field(default=False)
@@ -103,6 +106,19 @@ class DataArguments:
             "than this will be truncated, sequences shorter will be padded."
         },
     )
+    query_instruction: bool = field(
+        default=True,
+        metadata={
+            "help": "whether to use query instruction (MEDI data)"
+        },
+    )
+    
+    corpus_instruction: bool = field(
+        default=False,
+        metadata={
+            "help": "whether to use corpus instruction (MEDI data)"
+        },
+    )
     data_cache_dir: Optional[str] = field(
         default=None,
         metadata={"help": "Where do you want to store the data downloaded from huggingface"},
@@ -143,6 +159,7 @@ class DRTrainingArguments(TrainingArguments):
     gc_p_chunk_size: int = field(default=32)
     distillation: bool = field(default=False, metadata={"help": "Use distillation"})
     distil_mode: str = field(default="pairwise", metadata={"help": "Distillation mode"})
+    softmax_temperature: float = field(default=0.2) # temperature for cross entropy softmax 
 
 
 @dataclass
@@ -206,7 +223,7 @@ class InferenceArguments(TrainingArguments):
 
     remove_identical: bool = field(default=False, metadata={"help": "remove identical passages"})
 
-    reranking_depth: int = field(default=None, metadata={"help": "re-ranking depth"})
+    reranking_depth: int = field(default=100, metadata={"help": "re-ranking depth"})
     retrieve_depth: int = field(
         default=100, metadata={"help": "number of documents to retrieve in retriever"}
     )
@@ -223,6 +240,7 @@ class InferenceArguments(TrainingArguments):
     )
 
     faiss_starting_gpu: int = field(default=0, metadata={"help": "starting gpu for faiss"})
+    phase: str = field(default='encode', metadata={"help": "encode/retrieve/rerank"})
 
 
 @dataclass

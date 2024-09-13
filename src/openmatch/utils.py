@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 import datasets
 import torch
 from transformers import PreTrainedTokenizer
+import pandas as pd
 
 try:
     from opendelta import AdapterModel, BitFitModel, LoraModel, PrefixModel
@@ -75,10 +76,10 @@ class SimpleTrainPreProcessor:
                 data={self.query_field: self.queries[q]},
                 allow_not_found=self.allow_not_found,
             )
-        query_encoded = self.tokenizer.encode(
-            query, add_special_tokens=False, max_length=self.query_max_len, truncation=True
-        )
-        return query_encoded
+        # query_encoded = self.tokenizer.encode(
+        #     query, add_special_tokens=False, max_length=self.query_max_len, truncation=True
+        # )
+        return query
 
     def get_passage(self, p):
         entry = self.collection[int(p)] if p != "None" else self.collection[0]
@@ -92,18 +93,18 @@ class SimpleTrainPreProcessor:
                 self.doc_template, data=entry, allow_not_found=self.allow_not_found
             )
 
-        passage_encoded = self.tokenizer.encode(
-            content, add_special_tokens=False, max_length=self.doc_max_len, truncation=True
-        )
+        # passage_encoded = self.tokenizer.encode(
+        #     content, add_special_tokens=False, max_length=self.doc_max_len, truncation=True
+        # )
 
-        return passage_encoded
+        return passage
 
     def process_one(self, train):
         q, pp, nn = train
         train_example = {
             "query": self.get_query(q),
-            "positives": [self.get_passage(p) for p in pp],
-            "negatives": [self.get_passage(n) for n in nn],
+             "pos": [self.get_passage(p) for p in pp],
+             "neg": [self.get_passage(n) for n in nn],
         }
 
         return json.dumps(train_example)
@@ -168,13 +169,19 @@ def load_from_trec(input_path: str, as_list: bool = False, max_len_per_q: int = 
                     rank_result[qid] = {}
                     cnt = 0
                 if max_len_per_q is None or cnt < max_len_per_q:
-                    rank_result[qid][doc_id] = float(score)
+                    if qid == doc_id: # exclude itself
+                        cnt -= 1
+                    else:
+                        rank_result[qid][doc_id] = float(score)
             else:
                 if qid not in rank_result:
                     rank_result[qid] = []
                     cnt = 0
                 if max_len_per_q is None or cnt < max_len_per_q:
-                    rank_result[qid].append((doc_id, float(score)))
+                    if qid == doc_id: # exclude itself
+                        cnt -= 1
+                    else:
+                        rank_result[qid].append((doc_id, float(score)))
             cnt += 1
     return rank_result
 

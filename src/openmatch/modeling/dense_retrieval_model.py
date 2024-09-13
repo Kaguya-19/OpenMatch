@@ -31,6 +31,16 @@ from .linear import LinearHead
 logger = logging.getLogger(__name__)
 
 
+def last_token_pool(last_hidden_states: Tensor,
+                 attention_mask: Tensor) -> Tensor:
+    left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
+    if left_padding:
+        return last_hidden_states[:, -1]
+    else:
+        sequence_lengths = attention_mask.sum(dim=1) - 1
+        batch_size = last_hidden_states.shape[0]
+        return last_hidden_states[torch.arange(batch_size, device=last_hidden_states.device), sequence_lengths]
+
 @dataclass
 class DROutput(ModelOutput):
     q_reps: Tensor = None
@@ -43,10 +53,11 @@ class DRModel(nn.Module):
     def __init__(
         self,
         lm_q: PreTrainedModel,
-        lm_p: PreTrainedModel,
+        lm_p: PreTrainedModel = None,
         tied: bool = True,
         feature: str = "last_hidden_state",
         pooling: str = "first",
+        attention: str = "causal",
         head_q: nn.Module = None,
         head_p: nn.Module = None,
         normalize: bool = False,
@@ -65,6 +76,7 @@ class DRModel(nn.Module):
         self.feature = feature
         self.pooling = pooling
         self.normalize = normalize
+        self.attention = attention
 
         self.model_args = model_args
         self.train_args = train_args
@@ -157,11 +169,12 @@ class DRModel(nn.Module):
             )
 
             scores = torch.matmul(q_reps, p_reps.transpose(0, 1))
+            scores = scores / self.train_args.softmax_temperature
 
             target = torch.arange(scores.size(0), device=scores.device, dtype=torch.long)
             target = target * self.data_args.train_n_passages
 
-            loss = self.loss_fn(scores, target)
+            loss = self.loss_fn(scores, target, reduction='mean')
 
             if self.training and self.train_args.negatives_x_device:
                 loss = loss * self.world_size  # counter average weight reduction
@@ -202,6 +215,32 @@ class DRModel(nn.Module):
                 reps = mean_pooling(hidden, items.attention_mask)
             elif self.pooling == "no":
                 reps = hidden
+            elif self.pooling == "wmean":
+                attention_mask = getattr(items, "attention_mask")
+                attention_mask_ = attention_mask * attention_mask.cumsum(dim=1) # [0,1,1,1,0,0] -> [0,1,2,3,0,0]
+                # print(attention_mask.shape)
+                # print(attention_mask_.shape)
+                # print(attention_mask_)
+                s = torch.sum(hidden * attention_mask_.unsqueeze(-1).float(), dim=1)
+                d = attention_mask_.sum(dim=1, keepdim=True).float()
+                reps = s / d
+            elif self.pooling == "drop_wmean":
+                vector_dropout = nn.Dropout1d(0.3)
+                attention_mask = getattr(items, "attention_mask")
+                attention_mask_ = attention_mask * attention_mask.cumsum(dim=1) # [0,1,1,1,0,0] -> [0,1,2,3,0,0]
+                hidden_masked = hidden * attention_mask_.unsqueeze(-1).float()
+                hidden_masked  = vector_dropout(hidden_masked)
+                s = torch.sum(hidden_masked, dim=1)
+                d = attention_mask_.sum(dim=1, keepdim=True).float()
+                reps = s / d
+            elif self.pooling == "drop_mean":
+                vector_dropout = nn.Dropout1d(0.3)
+                attention_mask = getattr(items, "attention_mask")
+                hidden_masked = hidden * attention_mask.unsqueeze(-1).float()
+                hidden_masked  = vector_dropout(hidden_masked)
+                s = torch.sum(hidden_masked, dim=1)
+                d = attention_mask.sum(dim=1, keepdim=True).float()
+                reps = s / d
             else:
                 raise ValueError("Unknown pooling type: {}".format(self.pooling))
         if head is not None:
@@ -211,7 +250,7 @@ class DRModel(nn.Module):
         return hidden, reps
 
     def encode_passage(self, psg):
-        return self.encode(psg, self.lm_p, self.head_p)
+        return self.encode(psg, self.lm_p if self.lm_p is not None else self.lm_q, self.head_p)
 
     def encode_query(self, qry):
         return self.encode(qry, self.lm_q, self.head_q)
@@ -242,6 +281,43 @@ class DRModel(nn.Module):
                 lm_q = lm_p = model_class.from_pretrained(model_name_or_path, **hf_kwargs)
                 if config["linear_head"]:
                     head_q = head_p = LinearHead.load(model_name_or_path)
+                logger.info(f"model class = {model_class}")
+                # add attention pattern 
+                if model_args.attention == "bidirectional":
+                    config.is_causal = False
+                elif model_args.attention == "causal":
+                    # config.is_causal = True
+                    pass
+                else:
+                    raise ValueError(f"attention type {model_args.attention} is not valid")
+
+                # Create raw hf model
+                if model_args.dtype == "float16":
+                    lm_q = model_class.from_pretrained(
+                        model_name_or_path, 
+                        trust_remote_code=True,
+                        attn_implementation=model_args.attn_implementation, 
+                        config=config,
+                        torch_dtype=torch.float16,
+                        **hf_kwargs
+                    )
+                elif model_args.dtype == "bfloat16":
+                    lm_q = model_class.from_pretrained(
+                        model_name_or_path, 
+                        trust_remote_code=True,
+                        attn_implementation=model_args.attn_implementation, 
+                        config=config,
+                        torch_dtype=torch.bfloat16,
+                        **hf_kwargs
+                    )
+                else:
+                    lm_q = model_class.from_pretrained(
+                        model_name_or_path, 
+                        trust_remote_code=True,
+                        attn_implementation=model_args.attn_implementation, 
+                        config=config,
+                        **hf_kwargs
+                    )
             else:
                 _qry_model_path = os.path.join(model_name_or_path, "query_model")
                 _psg_model_path = os.path.join(model_name_or_path, "passage_model")
@@ -292,6 +368,13 @@ class DRModel(nn.Module):
             train_args=train_args,
         )
         return model
+    
+    def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs):
+        gradient_checkpointing_kwargs["use_reentrant"] = False # handle a bug with DDP
+        self.lm_q.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gradient_checkpointing_kwargs) # this model should be transformers model
+        if not self.tied:
+            self.lm_p.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gradient_checkpointing_kwargs) # this model should be transformers model
+        return
 
     def save(self, output_dir: str):
         if not self.tied:
@@ -337,6 +420,18 @@ class DRModelForInference(DRModel):
     def encode_query(self, qry):
         return super(DRModelForInference, self).encode_query(qry)
 
+    def forward(
+        self,
+        query: Dict[str, Tensor] = None,
+        passage: Dict[str, Tensor] = None,
+    ):
+        q_hidden, q_reps = self.encode_query(query)
+        p_hidden, p_reps = self.encode_passage(passage)
+        return DROutput(q_reps=q_reps, p_reps=p_reps)
+class DRModelForGDCache(DRModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
     def forward(
         self,
         query: Dict[str, Tensor] = None,

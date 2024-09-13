@@ -12,7 +12,7 @@ from transformers import BatchEncoding, PreTrainedTokenizer
 
 from ..arguments import DataArguments, DRPretrainingDataArguments
 from ..data_augmentation_strategy import Cropping, NullStrategy, SequentialStrategies
-from ..trainer import DRTrainer
+from ..trainer import DRTrainer, RRTrainer
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +115,10 @@ class MappingTrainDatasetMixin(Dataset):
 
 
 class DRTrainDataset(TrainDatasetBase):
-    def create_one_example(self, text_encoding: List[int], is_query=False) -> BatchEncoding:
+    def create_one_example(self, text: str, is_query=False) -> BatchEncoding:
         item = self.tokenizer.encode_plus(
-            text_encoding,
-            truncation="only_first",
+            text,
+            truncation=True,
             max_length=self.data_args.q_max_len if is_query else self.data_args.p_max_len,
             padding=False,
             return_attention_mask=False,
@@ -128,40 +128,44 @@ class DRTrainDataset(TrainDatasetBase):
 
     def get_process_fn(self, epoch, hashed_seed):
         def process_fn(example):
-            qry = example["query"]
-            encoded_query = self.create_one_example(qry, is_query=True)
-            encoded_passages = []
-            group_positives = example["positives"]
-            group_negatives = example["negatives"]
+            query: str = " ".join(example["query"]) if self.data_args.query_instruction else example["query"][1]
+            pos: str = " ".join(example["pos"]) if self.data_args.corpus_instruction else example["pos"][1]
+            negs: List[str] = [" ".join([example["neg"][0],example["neg"][i]]) if self.data_args.corpus_instruction else str(example["neg"][i]) for i in range(1,self.data_args.train_n_passages)] 
+            encoded_query = self.create_one_example(query, is_query=True)
+            encoded_passages = [self.create_one_example(pos)]
+            encoded_passages.extend([self.create_one_example(neg) for neg in negs])
+            # encoded_passages = []
+            # group_positives = example["positives"]
+            # group_negatives = example["negatives"]
 
-            if self.data_args.positive_passage_no_shuffle or hashed_seed is None:
-                pos_psg = group_positives[0]
-            else:
-                pos_psg = group_positives[(hashed_seed + epoch) % len(group_positives)]
-            encoded_passages.append(self.create_one_example(pos_psg))
+            # if self.data_args.positive_passage_no_shuffle or hashed_seed is None:
+            #     pos_psg = group_positives[0]
+            # else:
+            #     pos_psg = group_positives[(hashed_seed + epoch) % len(group_positives)]
+            # encoded_passages.append(self.create_one_example(pos_psg))
 
-            negative_size = self.data_args.train_n_passages - 1
-            if len(group_negatives) < negative_size:
-                if hashed_seed is not None:
-                    negs = random.choices(group_negatives, k=negative_size)
-                else:
-                    negs = [x for x in group_negatives]
-                    negs = negs * 2
-                    negs = negs[:negative_size]
-            elif self.data_args.train_n_passages == 1:
-                negs = []
-            elif self.data_args.negative_passage_no_shuffle:
-                negs = group_negatives[:negative_size]
-            else:
-                _offset = epoch * negative_size % len(group_negatives)
-                negs = [x for x in group_negatives]
-                if hashed_seed is not None:
-                    random.Random(hashed_seed).shuffle(negs)
-                negs = negs * 2
-                negs = negs[_offset : _offset + negative_size]
+            # negative_size = self.data_args.train_n_passages - 1
+            # if len(group_negatives) < negative_size:
+            #     if hashed_seed is not None:
+            #         negs = random.choices(group_negatives, k=negative_size)
+            #     else:
+            #         negs = [x for x in group_negatives]
+            #         negs = negs * 2
+            #         negs = negs[:negative_size]
+            # elif self.data_args.train_n_passages == 1:
+            #     negs = []
+            # elif self.data_args.negative_passage_no_shuffle:
+            #     negs = group_negatives[:negative_size]
+            # else:
+            #     _offset = epoch * negative_size % len(group_negatives)
+            #     negs = [x for x in group_negatives]
+            #     if hashed_seed is not None:
+            #         random.Random(hashed_seed).shuffle(negs)
+            #     negs = negs * 2
+            #     negs = negs[_offset : _offset + negative_size]
 
-            for neg_psg in negs:
-                encoded_passages.append(self.create_one_example(neg_psg))
+            # for neg_psg in negs:
+            #     encoded_passages.append(self.create_one_example(neg_psg))
 
             assert len(encoded_passages) == self.data_args.train_n_passages
 
@@ -262,33 +266,62 @@ class RRTrainDataset(TrainDatasetBase):
                 return_token_type_ids=True,
             )
         else:
-            item = self.tokenizer.encode_plus(
-                qry_encoding + psg_encoding,
-                truncation="longest_first",
-                max_length=self.data_args.q_max_len + self.data_args.p_max_len + 2,
+            # item = self.tokenizer.encode_plus(
+            #     qry_encoding + psg_encoding,
+            #     truncation="longest_first",
+            #     max_length=self.data_args.q_max_len + self.data_args.p_max_len + 2,
+            #     padding=False,
+            #     return_attention_mask=False,
+            #     return_token_type_ids=False,
+            # )
+            query = self.tokenizer.encode_plus(
+                qry_encoding,
+                add_special_tokens=False,
+                truncation=True,
+                max_length=self.data_args.q_max_len,
                 padding=False,
                 return_attention_mask=False,
                 return_token_type_ids=False,
             )
+            doc = self.tokenizer.encode_plus(
+                psg_encoding,
+                add_special_tokens=False,
+                truncation=True,
+                max_length=self.data_args.q_max_len ,
+                padding=False,
+                return_attention_mask=False,
+                return_token_type_ids=False,
+            )
+            item = {"input_ids":[self.tokenizer.bos_token_id] + query["input_ids"] + [self.tokenizer.eos_token_id] + doc["input_ids"]}
         return item
 
     def get_process_fn(self, epoch, hashed_seed):
         def process_fn(example):
-            qry = example["query"]
-            group_positives = example["positives"]
-            group_negatives = example["negatives"]
-
-            if self.data_args.positive_passage_no_shuffle or hashed_seed is None:
-                pos_psg = group_positives[0]
-            else:
-                pos_psg = group_positives[(hashed_seed + epoch) % len(group_positives)]
-            encoded_pos_pair = self.create_one_example(qry, pos_psg)
-
+            query: str = " ".join(example["query"]) if self.data_args.query_instruction else example["query"][1] 
+            pos: str = " ".join(example["pos"]) if self.data_args.corpus_instruction else example["pos"][1]
+            negs: List[str] = [" ".join([example["neg"][0],example["neg"][i]]) if self.data_args.corpus_instruction else example["neg"][i] for i in range(1,len(example["neg"]))]
+            encoded_pos_pair = self.create_one_example(query, pos)
+            
             if hashed_seed is None:
-                neg_psg = group_negatives[0]
+                negs = negs[:self.data_args.train_n_passages]
             else:
-                neg_psg = group_negatives[(hashed_seed + epoch) % len(group_negatives)]
-            encoded_neg_pair = self.create_one_example(qry, neg_psg)
+                negs = [negs[(hashed_seed + (epoch + 1) * (i + 1) ) % len(negs)] for i in range(self.data_args.train_n_passages)]                
+            encoded_neg_pair = [self.create_one_example(query,neg) for neg in negs]
+            # qry = example["query"]
+            # group_positives = example["positives"]
+            # group_negatives = example["negatives"]
+
+            # if self.data_args.positive_passage_no_shuffle or hashed_seed is None:
+            #     pos_psg = group_positives[0]
+            # else:
+            #     pos_psg = group_positives[(hashed_seed + epoch) % len(group_positives)]
+            # encoded_pos_pair = self.create_one_example(qry, pos_psg)
+
+            # if hashed_seed is None:
+            #     neg_psg = group_negatives[0]
+            # else:
+            #     neg_psg = group_negatives[(hashed_seed + epoch) % len(group_negatives)]
+            # encoded_neg_pair = self.create_one_example(qry, neg_psg)
             return {"pos_pair": encoded_pos_pair, "neg_pair": encoded_neg_pair}
 
         return process_fn

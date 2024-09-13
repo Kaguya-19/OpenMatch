@@ -4,11 +4,13 @@ import logging
 import os
 from itertools import repeat
 from typing import Any, Dict, List, Optional, Tuple, Union
+import shutil
 
 import datasets
 import torch
 import torch.distributed as dist
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from transformers.file_utils import is_datasets_available
 from transformers.trainer import TRAINING_ARGS_NAME, Trainer
 from transformers.trainer_pt_utils import IterableDatasetShard
@@ -26,11 +28,13 @@ except ModuleNotFoundError:
 
 
 class DRTrainer(Trainer):
-    def __init__(self, delta_model=None, *args, **kwargs):
+    def __init__(self, model_name_or_path, delta_model=None, *args, **kwargs):
         super(DRTrainer, self).__init__(*args, **kwargs)
         self.delta_model = delta_model
         self._dist_loss_scale_factor = dist.get_world_size() if self.args.negatives_x_device else 1
-
+        self.model_name_or_path = model_name_or_path
+        self.process_rank = dist.get_rank()
+        self.world_size = dist.get_world_size()
     def _save(self, output_dir: Optional[str] = None):
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -148,11 +152,11 @@ class GCDenseTrainer(DRTrainer):
                 "Grad Cache package not available. You can obtain it from https://github.com/luyug/GradCache."
             )
         super(GCDenseTrainer, self).__init__(*args, **kwargs)
-
+        self.scaler = torch.cuda.amp.GradScaler()
         loss_fn_cls = (
             DistributedContrastiveLoss if self.args.negatives_x_device else SimpleContrastiveLoss
         )
-        loss_fn = loss_fn_cls()
+        loss_fn = loss_fn_cls(temperature=0.02)
 
         self.gc = GradCache(
             models=[self.model, self.model],

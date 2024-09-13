@@ -25,7 +25,8 @@ class QPCollator(DataCollatorWithPadding):
             qq = sum(qq, [])
         if isinstance(dd[0], list):
             dd = sum(dd, [])
-
+            if isinstance(dd[0], list):
+                dd = sum(dd, [])
         q_collated = self.tokenizer.pad(
             qq,
             padding="max_length",
@@ -74,6 +75,43 @@ class PairCollator(DataCollatorWithPadding):
             max_length=self.max_q_len + self.max_p_len + 2,
             return_tensors="pt",
         )
+        return pos_pair_collated, neg_pair_collated
+    
+@dataclass
+class UnfairPairCollator(DataCollatorWithPadding):
+    """
+    Wrapper that does conversion from List[Tuple[encode_qry, encode_psg]] to List[qry], List[psg]
+    and pass batch separately to the actual collator.
+    Abstract out data detail for the model.
+    """
+
+    max_q_len: int = 32
+    max_p_len: int = 128
+
+    def __call__(self, features):
+        pos_pairs = [f["pos_pair"] for f in features]
+        neg_pairs = [f["neg_pair"] for f in features]
+
+        if isinstance(pos_pairs[0], list):
+            pos_pairs = sum(pos_pairs, [])
+        if isinstance(neg_pairs[0], list):
+            neg_pairs = sum(neg_pairs, [])
+            if isinstance(neg_pairs[0], list):
+                neg_pairs = sum(neg_pairs, [])
+
+        pos_pair_collated = self.tokenizer.pad(
+            pos_pairs,
+            padding="max_length",
+            max_length=self.max_q_len + self.max_p_len + 2,
+            return_tensors="pt",
+        )
+        neg_pair_collated = self.tokenizer.pad(
+            neg_pairs,
+            padding="max_length",
+            max_length=self.max_q_len + self.max_p_len + 2,
+            return_tensors="pt",
+        )
+        
 
         return pos_pair_collated, neg_pair_collated
 

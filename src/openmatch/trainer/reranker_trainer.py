@@ -6,21 +6,26 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from transformers.trainer import Trainer
+from transformers.trainer import TRAINING_ARGS_NAME,Trainer
 from transformers.trainer_pt_utils import nested_detach
 
 logger = logging.getLogger(__name__)
 
 
 class RRTrainer(Trainer):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args,model_name_or_path, **kwargs):
         super(RRTrainer, self).__init__(*args, **kwargs)
+        self.model_name_or_path = model_name_or_path
 
     def _save(self, output_dir: Optional[str] = None):
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
         logger.info("Saving model checkpoint to %s", output_dir)
         self.model.save(output_dir)
+        if self.tokenizer is not None:
+            self.tokenizer.save_pretrained(output_dir)
+        torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
+
 
     def _prepare_inputs(
         self, inputs: Tuple[Dict[str, Union[torch.Tensor, Any]], ...]

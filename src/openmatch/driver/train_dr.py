@@ -10,7 +10,7 @@ from openmatch.arguments import DataArguments
 from openmatch.arguments import DRTrainingArguments as TrainingArguments
 from openmatch.arguments import ModelArguments
 from openmatch.dataset import MappingDRTrainDataset, QPCollator, StreamDRTrainDataset
-from openmatch.modeling import DRModel
+from openmatch.modeling import DRModel, DRModelForGDCache
 from openmatch.trainer import DRTrainer as Trainer
 from openmatch.trainer import GCDenseTrainer
 from openmatch.utils import get_delta_model_class
@@ -71,7 +71,8 @@ def main():
         cache_dir=model_args.cache_dir,
         use_fast=False,
     )
-    model = DRModel.build(
+    model_cls = DRModelForGDCache if training_args.grad_cache else DRModel
+    model = model_cls.build(
         model_args=model_args,
         data_args=data_args,
         train_args=training_args,
@@ -91,7 +92,7 @@ def main():
     train_dataset = train_dataset_cls(
         tokenizer,
         data_args,
-        shuffle_seed=training_args.seed,
+        # shuffle_seed=training_args.seed,
         cache_dir=data_args.data_cache_dir or model_args.cache_dir,
     )
     eval_dataset = (
@@ -116,6 +117,7 @@ def main():
             tokenizer, max_p_len=data_args.p_max_len, max_q_len=data_args.q_max_len
         ),
         delta_model=delta_model if model_args.param_efficient_method else None,
+        model_name_or_path=model_args.model_name_or_path
     )
     train_dataset.trainer = trainer
 

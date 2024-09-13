@@ -8,7 +8,7 @@ from transformers import AutoConfig, AutoTokenizer, HfArgumentParser, set_seed
 
 from openmatch.arguments import DataArguments, ModelArguments
 from openmatch.arguments import RRTrainingArguments as TrainingArguments
-from openmatch.dataset import MappingRRTrainDataset, PairCollator, StreamRRTrainDataset
+from openmatch.dataset import MappingRRTrainDataset, UnfairPairCollator, StreamRRTrainDataset
 from openmatch.modeling import RRModel
 from openmatch.trainer import RRTrainer as Trainer
 
@@ -103,9 +103,10 @@ def main():
         tokenizer=tokenizer,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        data_collator=PairCollator(
+        data_collator=UnfairPairCollator(
             tokenizer, max_p_len=data_args.p_max_len, max_q_len=data_args.q_max_len
         ),
+        model_name_or_path=model_args.model_name_or_path
     )
     train_dataset.trainer = trainer
 
