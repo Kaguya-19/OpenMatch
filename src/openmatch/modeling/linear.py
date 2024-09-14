@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class LinearHead(nn.Module):
     def __init__(
         self,
-        input_dim: int = 768,
+        input_dim: int = 2304,
         output_dim: int = 768,
     ):
         super(LinearHead, self).__init__()

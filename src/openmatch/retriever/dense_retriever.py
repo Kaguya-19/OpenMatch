@@ -6,7 +6,7 @@ import pickle
 from contextlib import nullcontext
 from typing import Dict, List, Union
 
-import faiss
+# import faiss
 import numpy as np
 import torch
 from torch.cuda import amp

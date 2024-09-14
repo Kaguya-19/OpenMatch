@@ -134,22 +134,22 @@ class Reranker:
                 scores = outputs.cpu().numpy()
                 add_to_result_dict(return_dict, qids, dids, scores)
 
-        if self.args.world_size > 1:
-            save_as_trec(
-                return_dict, self.args.trec_save_path + ".rank.{}".format(self.args.process_index)
-            )
-            torch.distributed.barrier()
-            if self.args.process_index == 0:
-                # aggregate results
-                all_results = []
-                for i in range(self.args.world_size):
-                    all_results.append(
-                        load_from_trec(self.args.trec_save_path + ".rank.{}".format(i))
-                    )
-                return_dict = merge_retrieval_results_by_score(all_results)
-                # remove temp files
-                for i in range(self.args.world_size):
-                    os.remove(self.args.trec_save_path + ".rank.{}".format(i))
-            torch.distributed.barrier()
+        # if self.args.world_size > 1:
+        #     save_as_trec(
+        #         return_dict, self.args.trec_save_path + ".rank.{}".format(self.args.process_index)
+        #     )
+        #     torch.distributed.barrier()
+        #     if self.args.process_index == 0:
+        #         # aggregate results
+        #         all_results = []
+        #         for i in range(self.args.world_size):
+        #             all_results.append(
+        #                 load_from_trec(self.args.trec_save_path + ".rank.{}".format(i))
+        #             )
+        #         return_dict = merge_retrieval_results_by_score(all_results)
+        #         # remove temp files
+        #         for i in range(self.args.world_size):
+        #             os.remove(self.args.trec_save_path + ".rank.{}".format(i))
+        #     torch.distributed.barrier()
 
         return return_dict

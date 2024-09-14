@@ -152,7 +152,6 @@ class RRModel(nn.Module):
     def build(
         cls,
         model_args: ModelArguments,
-        model_name_or_path: str = None,
         data_args: DataArguments = None,
         train_args: TrainingArguments = None,
         tokenizer: PreTrainedTokenizer = None,
@@ -166,52 +165,19 @@ class RRModel(nn.Module):
             with open(os.path.join(model_args.model_name_or_path, "openmatch_config.json")) as f:
                 config = json.load(f)
 
-        # an OpenMatch model
-        if model_args.attention == "bidirectional":
-            config.is_causal = False
-        elif model_args.attention == "causal":
-            # config.is_causal = True
-            pass
-        else:
-            raise ValueError(f"attention type {model_args.attention} is not valid")
+
         
         if os.path.isdir(model_args.model_name_or_path) and config is not None:
             logger.info(f"loading reranking model weight from {model_args.model_name_or_path}")
             model_name = config["plm_backbone"]["type"]
             model_class = getattr(importlib.import_module("transformers"), model_name)
-            if model_args.dtype == "float16":
-                lm_r = model_class.from_pretrained(
-                model_args.model_name_or_path, 
-                trust_remote_code=True,
-                attn_implementation=model_args.attn_implementation, 
-                config=config,
-                torch_dtype=torch.float16,
-                **hf_kwargs
-            )
-            elif model_args.dtype == 'bfloat16':
-                lm_r = model_class.from_pretrained(
-                model_args.model_name_or_path, 
-                trust_remote_code=True,
-                attn_implementation=model_args.attn_implementation, 
-                config=config,
-                torch_dtype=torch.bfloat16,
-                **hf_kwargs
-                )
-            else:
-                lm_r = model_class.from_pretrained(
-                model_args.model_name_or_path, 
-                trust_remote_code=True,
-                attn_implementation=model_args.attn_implementation, 
-                config=config,
-                **hf_kwargs
-            )
             head = (
                 LinearHead.load(ckpt_dir=model_args.model_name_or_path)
                 if os.path.exists(os.path.join(model_args.model_name_or_path, "head_config.json"))
                 else None
             )
         else:  # a Huggingface model
-            hf_config = AutoConfig.from_pretrained(model_args.model_name_or_path, **hf_kwargs)
+            hf_config = AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True, **hf_kwargs)
             if model_args.encoder_only:
                 model_class = T5EncoderModel
                 head = LinearHead(model_args.projection_in_dim, 1)
@@ -223,7 +189,42 @@ class RRModel(nn.Module):
             else:
                 model_class = AutoModel
                 head = LinearHead(model_args.projection_in_dim, 1)
-            lm_r = model_class.from_pretrained(model_args.model_name_or_path, **hf_kwargs)
+            if model_args.attention == "bidirectional":
+                 hf_config.is_causal = False
+            elif model_args.attention == "causal":
+                # config.is_causal = True
+                pass
+            else:
+                raise ValueError(f"attention type {model_args.attention} is not valid")
+            
+            if model_args.dtype == "float16":
+                lm_r = model_class.from_pretrained(
+                model_args.model_name_or_path, 
+                trust_remote_code=True,
+                attn_implementation=model_args.attn_implementation, 
+                config= hf_config,
+                torch_dtype=torch.float16,
+                **hf_kwargs
+            )
+            elif model_args.dtype == 'bfloat16':
+                lm_r = model_class.from_pretrained(
+                model_args.model_name_or_path, 
+                trust_remote_code=True,
+                attn_implementation=model_args.attn_implementation, 
+                config= hf_config,
+                torch_dtype=torch.bfloat16,
+                **hf_kwargs
+                )
+            else:
+                lm_r = model_class.from_pretrained(
+                model_args.model_name_or_path, 
+                trust_remote_code=True,
+                attn_implementation=model_args.attn_implementation, 
+                config= hf_config,
+                **hf_kwargs
+            )
+            # lm_r = model_class.from_pretrained(model_args.model_name_or_path, trust_remote_code=True, **hf_kwargs)
+            config = None
 
         model = cls(
             lm_r=lm_r,

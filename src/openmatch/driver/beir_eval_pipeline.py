@@ -45,16 +45,16 @@ def main():
         data_args: DataArguments
         encoding_args: EncodingArguments
 
-    if os.path.exists(encoding_args.output_dir) and os.listdir(encoding_args.output_dir):
-        if not encoding_args.overwrite_output_dir:
-            raise ValueError(
-                f"Output directory ({encoding_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
-            )
-        else:
-            # remove all files in the output directory
-            if encoding_args.local_process_index == 0:
-                for file in os.listdir(encoding_args.output_dir):
-                    os.remove(os.path.join(encoding_args.output_dir, file))
+    # if os.path.exists(encoding_args.output_dir) and os.listdir(encoding_args.output_dir):
+    #     if not encoding_args.overwrite_output_dir:
+    #         raise ValueError(
+    #             f"Output directory ({encoding_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
+    #         )
+    #     else:
+    #         # remove all files in the output directory
+    #         if encoding_args.local_process_index == 0:
+    #             for file in os.listdir(encoding_args.output_dir):
+    #                 os.remove(os.path.join(encoding_args.output_dir, file))
 
     # Setup logging
     logging.basicConfig(
@@ -79,7 +79,7 @@ def main():
     config = AutoConfig.from_pretrained(
         model_args.config_name if model_args.config_name else model_args.model_name_or_path,
         num_labels=num_labels,
-        cache_dir=model_args.cache_dir,
+        cache_dir=model_args.cache_dir,trust_remote_code=True
     )
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
@@ -163,7 +163,7 @@ def main():
         model = None
     
     if encoding_args.phase == "retrieve":
-        
+        split_name = "test"
         qrels = {}
         qrels_path = os.path.join(data_args.data_dir, "qrels", f"{split_name}.tsv")
         

@@ -141,10 +141,10 @@ def save_as_trec(
         for qid in rank_result:
             # sort the results by score
             sorted_results = sorted(
-                rank_result[qid].items(), key=lambda x: x[1]["score"], reverse=True
+                rank_result[qid].items(), key=lambda x: x[1], reverse=True
             )
             for i, (doc_id, score) in enumerate(sorted_results):
-                f.write("{} Q0 {} {} {} {}\n".format(qid, doc_id, i + 1, score["score"], run_id))
+                f.write("{} Q0 {} {} {} {}\n".format(qid, doc_id, i + 1, score, run_id))
 
 
 def load_from_trec(input_path: str, as_list: bool = False, max_len_per_q: int = None):
@@ -284,7 +284,7 @@ def merge_retrieval_results_by_score(
         merged_results[qid] = {
             k: v
             for k, v in sorted(
-                merged_results[qid].items(), key=lambda x: x[1]["score"], reverse=True
+                merged_results[qid].items(), key=lambda x: x[1], reverse=True
             )[:topk]
         }
     return merged_results

@@ -48,8 +48,8 @@ class ModelArguments:
 
     # out projection
     add_linear_head: bool = field(default=False)
-    projection_in_dim: int = field(default=768)
-    projection_out_dim: int = field(default=768)
+    projection_in_dim: int = field(default=2304)
+    projection_out_dim: int = field(default=1)
 
     # for Jax training
     dtype: Optional[str] = field(
@@ -74,6 +74,8 @@ class ModelArguments:
     param_efficient_method: Optional[str] = field(
         default=None, metadata={"help": "Param efficient method used in model training"}
     )
+    
+    attn_implementation: str = field(default='sdpa', metadata={"help": "eager/sdpa/flash_attention_2"})
 
 
 @dataclass

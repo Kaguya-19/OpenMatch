@@ -7,6 +7,7 @@ from .data_collator import (
     PairwiseDistillationCollator,
     QPCollator,
     RRInferenceCollator,
+    UnfairPairCollator
 )
 from .inference_dataset import (
     InferenceDataset,

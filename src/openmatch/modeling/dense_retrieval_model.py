@@ -174,7 +174,7 @@ class DRModel(nn.Module):
             target = torch.arange(scores.size(0), device=scores.device, dtype=torch.long)
             target = target * self.data_args.train_n_passages
 
-            loss = self.loss_fn(scores, target, reduction='mean')
+            loss = self.loss_fn(scores, target)
 
             if self.training and self.train_args.negatives_x_device:
                 loss = loss * self.world_size  # counter average weight reduction
@@ -282,42 +282,7 @@ class DRModel(nn.Module):
                 if config["linear_head"]:
                     head_q = head_p = LinearHead.load(model_name_or_path)
                 logger.info(f"model class = {model_class}")
-                # add attention pattern 
-                if model_args.attention == "bidirectional":
-                    config.is_causal = False
-                elif model_args.attention == "causal":
-                    # config.is_causal = True
-                    pass
-                else:
-                    raise ValueError(f"attention type {model_args.attention} is not valid")
-
-                # Create raw hf model
-                if model_args.dtype == "float16":
-                    lm_q = model_class.from_pretrained(
-                        model_name_or_path, 
-                        trust_remote_code=True,
-                        attn_implementation=model_args.attn_implementation, 
-                        config=config,
-                        torch_dtype=torch.float16,
-                        **hf_kwargs
-                    )
-                elif model_args.dtype == "bfloat16":
-                    lm_q = model_class.from_pretrained(
-                        model_name_or_path, 
-                        trust_remote_code=True,
-                        attn_implementation=model_args.attn_implementation, 
-                        config=config,
-                        torch_dtype=torch.bfloat16,
-                        **hf_kwargs
-                    )
-                else:
-                    lm_q = model_class.from_pretrained(
-                        model_name_or_path, 
-                        trust_remote_code=True,
-                        attn_implementation=model_args.attn_implementation, 
-                        config=config,
-                        **hf_kwargs
-                    )
+                
             else:
                 _qry_model_path = os.path.join(model_name_or_path, "query_model")
                 _psg_model_path = os.path.join(model_name_or_path, "passage_model")
@@ -347,12 +312,49 @@ class DRModel(nn.Module):
                     head_p = LinearHead.load(_psg_head_path)
         else:  # a Huggingface model
             tied = not model_args.untie_encoder
+            config = AutoConfig.from_pretrained(model_name_or_path,trust_remote_code=True)
             model_class = T5EncoderModel if model_args.encoder_only else AutoModel
-            lm_q = model_class.from_pretrained(model_name_or_path, **hf_kwargs)
+            # add attention pattern 
+            if model_args.attention == "bidirectional":
+                config.is_causal = False
+            elif model_args.attention == "causal":
+                # config.is_causal = True
+                pass
+            else:
+                raise ValueError(f"attention type {model_args.attention} is not valid")
+            # Create raw hf model
+            if model_args.dtype == "float16":
+                lm_q = model_class.from_pretrained(
+                    model_name_or_path, 
+                    trust_remote_code=True,
+                    attn_implementation=model_args.attn_implementation, 
+                    config=config,
+                    torch_dtype=torch.float16,
+                    **hf_kwargs
+                )
+            elif model_args.dtype == "bfloat16":
+                lm_q = model_class.from_pretrained(
+                    model_name_or_path, 
+                    trust_remote_code=True,
+                    attn_implementation=model_args.attn_implementation, 
+                    config=config,
+                    torch_dtype=torch.bfloat16,
+                    **hf_kwargs
+                )
+            else:
+                lm_q = model_class.from_pretrained(
+                    model_name_or_path, 
+                    trust_remote_code=True,
+                    attn_implementation=model_args.attn_implementation, 
+                    config=config,
+                    **hf_kwargs
+                )
+            # lm_q = model_class.from_pretrained(model_name_or_path, trust_remote_code=True, **hf_kwargs)
             lm_p = copy.deepcopy(lm_q) if not tied else lm_q
             if model_args.add_linear_head:
                 head_q = LinearHead(model_args.projection_in_dim, model_args.projection_out_dim)
                 head_p = copy.deepcopy(head_q) if not tied else head_q
+            config = None
 
         model = cls(
             lm_q=lm_q,
@@ -410,7 +412,7 @@ class DRModel(nn.Module):
 class DRModelForInference(DRModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # self.eval()
+        self.eval()
 
     @torch.no_grad()
     def encode_passage(self, psg):
